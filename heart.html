@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<title>Heart of “I love you”</title>
+<style>
+  :root{
+    --bg1:#0b0b13; --bg2:#171a2a;
+    --bubble-bg: rgba(255,255,255,.08);
+    --bubble-text:#f6f6f6;
+    --safe-pad: 20px;
+
+    --safe-top: env(safe-area-inset-top);
+    --safe-right: env(safe-area-inset-right);
+    --safe-bottom: env(safe-area-inset-bottom);
+    --safe-left: env(safe-area-inset-left);
+  }
+  html,body{
+    height:100%; margin:0;
+    background:radial-gradient(1200px 800px at 50% 60%, var(--bg2), var(--bg1));
+    color:#fff;
+    font-family: ui-sans-serif, system-ui, -apple-system, "SF Pro Text", "Helvetica Neue", Arial, "PingFang SC", "Microsoft Yahei", "Noto Sans CJK SC", sans-serif;
+  }
+  .stage{position:fixed; inset:0; overflow:hidden;}
+  canvas{position:absolute; inset:0; width:100%; height:100%; pointer-events:none; z-index:5; filter: drop-shadow(0 0 10px rgba(255,77,184,.25));}
+  .bubbles{position:absolute; inset:0; z-index:1; pointer-events:none;}
+  .controls{
+    position:absolute;
+    right:calc(max(12px, env(safe-area-inset-right)));
+    bottom:calc(max(12px, env(safe-area-inset-bottom)));
+    display:flex; gap:10px; z-index:10;
+  }
+  .btn{
+    appearance:none; border:1px solid rgba(255,255,255,.15); background:rgba(255,255,255,.06);
+    color:#fff; border-radius:12px; padding:.55em .9em; font-size:14px;
+    backdrop-filter: blur(4px); cursor:pointer;
+  }
+  .bubble{
+    position:absolute; max-width:min(58vw, 360px);
+    padding:.6em .9em; border-radius:16px;
+    background: var(--bubble-bg); color: var(--bubble-text);
+    backdrop-filter: blur(6px) brightness(1.05);
+    -webkit-backdrop-filter: blur(6px) brightness(1.05);
+    box-shadow: 0 6px 18px rgba(0,0,0,.25), inset 0 0 0 1px rgba(255,255,255,.08);
+    font-size: clamp(12px, 2.8vw, 16px); line-height:1.35; pointer-events:none;
+    white-space: nowrap; overflow:hidden; text-overflow: ellipsis;
+    animation: floatY 9s ease-in-out infinite, swayX 7s ease-in-out infinite;
+  }
+  .bubble.small{font-size: clamp(11px,2.5vw,14px); opacity:.85}
+  .bubble::before{
+    content:""; position:absolute; width:10px; height:10px; left:12px; bottom:-4px; transform:rotate(45deg);
+    background: var(--bubble-bg);
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,.08);
+  }
+  @keyframes floatY{ 0%,100%{ transform:translateY(-6px) } 50%{ transform:translateY(6px) } }
+  @keyframes swayX { 0%,100%{ margin-left:0 } 50%{ margin-left:8px } }
+
+  /* 认识多久显示 */
+  .since{
+    position:absolute;
+    top:calc(max(12px, env(safe-area-inset-top)));
+    left:50%; transform:translateX(-50%);
+    z-index:12;
+    background: rgba(255,255,255,.08);
+    border:1px solid rgba(255,255,255,.15);
+    padding:.5em .9em;
+    border-radius:14px;
+    font-size: clamp(12px, 3.2vw, 15px);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    box-shadow: 0 6px 14px rgba(0,0,0,.25);
+    white-space: nowrap;
+  }
+  .since .dot{opacity:.6;margin:0 .4em}
+</style>
+</head>
+<body>
+  <div class="stage" id="stage">
+    <div class="since" id="since">瓜瓜 ✦ 小星 <span class="dot">•</span> 认识 0 天 0 小时 0 分</div>
+
+    <canvas id="cv"></canvas>
+    <div class="bubbles" id="bubbles"></div>
+    <div class="controls">
+      <button class="btn" id="toggle">暂停</button>
+      <button class="btn" id="shuffle">换一批</button>
+    </div>
+  </div>
+
+<script>
+(()=>{
+
+/* ===== 词表 ===== */
+const WORDS = [
+  "我爱你","I love you","Je t’aime","Te amo","Ich liebe dich","Ti amo","Я тебя люблю","사랑해","愛してる",
+  "Seni seviyorum","Σε αγαπώ","Te iubesc","Eu te amo","Jeg elsker deg","Jeg elsker dig","Jag älskar dig",
+  "Ik hou van jou","Kocham Cię","Miluji tě","Szeretlek","Volim te","Ljubim te","Mahal kita","Gihigugma tika",
+  "Aku cinta padamu","Saya cintakan mu","אהבה אותך","أحبك","मैं तुमसे प्यार करता हूँ","আমি তোমাকে ভালোবাসি",
+  "நான் உன்னை காதலிக்கிறேன்","ನಾನು ನಿನ್ನನ್ನು ಪ್ರೀತಿಸುತ್ತೇನೆ","నేను నిన్ను ప్రేమిస్తున్నాను"," ഞാൻ നിന്നെ സ്നേഹിക്കുന്നു",
+  "මම ඔයාට ආදරෙයි"
+];
+
+/* ===== 气泡文案（肉麻可爱 + 小狗 + 每晚晚安） ===== */
+const CARE = [
+  "小星勾勾手指瓜瓜就过来了",
+  "小星今天也要发光啦✨",
+  "水杯举高高，咕噜咕噜～",
+  "吃一口正经饭，再去当可爱鬼",
+  "如果累了就对我说：要抱抱",
+  "想你想得屏幕都粉了",
+  "晚一点起床也没关系，公主今天被允许赖床",
+  "给我一个晚安，我用整晚的梦还你",
+  "你是我最喜欢的通知提醒",
+  "小星～你一上线我这只小狗就摇尾巴啦🐶",
+  "瓜瓜宣誓：永远是小星的小狗，只对你汪汪～",
+  "开播前给你一个抱抱充电🔋啵！",
+  "今天也把小星拐回家，我给你提灯✨",
+  "小星笑一下，我心跳就乱七八糟了",
+  "今天的可爱由你负责，我负责心动",
+  "给我一个“到家啦”，我就安心当门口小狗",
+  "若是心情皱皱的，来瓜瓜37度的怀里抚平",
+  "让世界等一会儿，先亲一下再说",
+  "晚安要每天说：小星晚安，瓜瓜爱你到天亮",
+  "没事，我在；有事，我更在",
+  "想你到打字都变粉色泡泡了",
+  "把我装进口袋里，随时掏出亲一口",
+  "今天也按计划喜欢你一整天",
+  "你一眨眼，我就被收编—家养小狗√",
+  "给我一条“晚安小狗”，我就做护梦骑士",
+  "小星最可爱这件事，已经写进宇宙法则"
+];
+
+/* ===== 画布/心形 ===== */
+const canvas = document.getElementById('cv');
+const ctx = canvas.getContext('2d');
+let dpr = Math.max(1, window.devicePixelRatio || 1);
+let W=0,H=0;
+function resize(){
+  const r = canvas.getBoundingClientRect();
+  W = Math.floor(r.width * dpr); H = Math.floor(r.height * dpr);
+  canvas.width = W; canvas.height = H;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+}
+resize(); addEventListener('resize', resize);
+
+/* 安全边距 */
+function getPadPx(){
+  const base = Math.max(20, Math.min(window.innerWidth, window.innerHeight) * 0.06);
+  const cs = getComputedStyle(document.documentElement);
+  const insetTop    = parseFloat(cs.getPropertyValue('--safe-top'))    || 0;
+  const insetRight  = parseFloat(cs.getPropertyValue('--safe-right'))  || 0;
+  const insetBottom = parseFloat(cs.getPropertyValue('--safe-bottom')) || 0;
+  const insetLeft   = parseFloat(cs.getPropertyValue('--safe-left'))   || 0;
+  const ctrl = 48;
+  return {left:base+insetLeft, right:base+insetRight, top:base+insetTop, bottom:base+insetBottom+ctrl};
+}
+
+/* 心形曲线 */
+function heart(t){
+  const x = 16*Math.sin(t)**3;
+  const y = 13*Math.cos(t) - 5*Math.cos(2*t) - 2*Math.cos(3*t) - Math.cos(4*t);
+  return [x,y];
+}
+
+/* 单位心形包围盒 */
+let HBOX=null;
+function calcHeartBox(){
+  let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity;
+  for(let tt=-Math.PI; tt<=Math.PI; tt+=0.002){
+    const [x,y]=heart(tt);
+    if(x<minX)minX=x; if(x>maxX)maxX=x;
+    if(y<minY)minY=y; if(y>maxY)maxY=y;
+  }
+  HBOX={minX,maxX,minY,maxY,w:maxX-minX,h:maxY-minY};
+}
+calcHeartBox();
+
+/* 缩放/中心 */
+let scale=1,cx=0,cy=0, bandPx=0, PADL=20,PADR=20,PADT=20,PADB=20;
+function updateTransform(){
+  const pad = getPadPx();
+  PADL = pad.left; PADR = pad.right; PADT = pad.top; PADB = pad.bottom;
+
+  const maxFontPx = 18;
+  const textHalfW = maxFontPx * 6.5;
+  const textHalfH = maxFontPx * 0.8;
+
+  const usableW = (W/dpr) - (PADL + PADR) - 2*textHalfW;
+  const usableH = (H/dpr) - (PADT + PADB) - 2*textHalfH;
+
+  const sx = usableW / HBOX.w;
+  const sy = usableH / HBOX.h;
+  scale = Math.max(6, Math.min(sx, sy)) * dpr;
+
+  cx = (PADL*dpr) + (usableW*dpr)/2 + textHalfW*dpr;
+  cy = (PADT*dpr) + (usableH*dpr)/2 + textHalfH*dpr;
+
+  bandPx = 26*dpr;
+}
+updateTransform(); addEventListener('resize', updateTransform);
+
+/* 到心形最近距离 */
+function distToHeart(px,py){
+  let minD = Infinity;
+  for(let tt=-Math.PI; tt<=Math.PI; tt+=0.012){
+    const [hx,hy] = heart(tt);
+    const x = cx + hx*scale;
+    const y = cy - hy*scale;
+    const d = Math.hypot(px - x, py - y);
+    if(d < minD) minD = d;
+  }
+  return minD;
+}
+
+/* 心形粒子 */
+const COUNT = 80;
+const baseT = new Array(COUNT).fill(0).map((_,i)=> -Math.PI + i*(2*Math.PI/COUNT));
+const speeds = new Array(COUNT).fill(0).map(()=> (0.15 + Math.random()*0.1) * (Math.random()<.5?-1:1));
+const sizes  = new Array(COUNT).fill(0).map(()=> 12 + Math.random()*6);
+let t0 = performance.now(), paused=false;
+
+function clampWordInside(x, y, w, fs){
+  const glow = 14*dpr;
+  const left   = PADL*dpr + w/2 + glow;
+  const right  = W - PADR*dpr - w/2 - glow;
+  const top    = PADT*dpr + fs/2 + glow;
+  const bottom = H - PADB*dpr - fs/2 - glow;
+  if(x < left)  x = left;
+  if(x > right) x = right;
+  if(y < top)   y = top;
+  if(y > bottom)y = bottom;
+  return {x,y};
+}
+
+function drawWords(now){
+  const t = (now - t0)/1000;
+  ctx.clearRect(0,0,W,H);
+
+  for(let i=0;i<28;i++){
+    const x = (i*127.3 % 1)*W, y = ((i*313.7 + t*.02)%1)*H;
+    ctx.globalAlpha = .06 + .04*Math.sin(t*2+i);
+    ctx.fillStyle = "#fff";
+    ctx.beginPath(); ctx.arc(x,y, 1.2*dpr, 0, Math.PI*2); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
+  for(let i=0;i<COUNT;i++){
+    const tt = baseT[i] + speeds[i]*t;
+    const [hx,hy] = heart(tt);
+    let x = cx + hx*scale;
+    let y = cy - hy*scale;
+
+    const fs = sizes[i]*dpr;
+    ctx.font = `600 ${fs}px ui-sans-serif,system-ui,Arial`;
+    const word = WORDS[i % WORDS.length];
+    const w = ctx.measureText(word).width;
+
+    ({x,y} = clampWordInside(x,y,w,fs));
+
+    ctx.save();
+    ctx.shadowColor = `rgba(255,154,223,.5)`;
+    ctx.shadowBlur = 12*dpr;
+    ctx.fillStyle = `rgba(255,77,184,.9)`;
+    ctx.fillText(word, x, y);
+    ctx.lineWidth = .8*dpr; ctx.strokeStyle = "rgba(0,0,0,.25)";
+    ctx.strokeText(word, x, y);
+    ctx.restore();
+  }
+}
+
+/* 气泡 */
+const bubbleBox = document.getElementById('bubbles');
+let bubbles = [];
+function rand(min,max){ return Math.random()*(max-min)+min; }
+
+function createBubbles(){
+  bubbleBox.innerHTML=""; bubbles=[];
+  const count = Math.min(26, CARE.length);
+  const used = new Set();
+  const rect = bubbleBox.getBoundingClientRect();
+
+  for(let i=0;i<count;i++){
+    let text;
+    while(true){ text = CARE[Math.floor(Math.random()*CARE.length)]; if(!used.has(text)){used.add(text);break;} }
+    const div = document.createElement('div');
+    div.className = 'bubble'+(Math.random()<.45?" small":"");
+    div.textContent = text;
+    bubbleBox.appendChild(div);
+
+    let x,y,ok=false,tryCnt=0;
+    while(!ok && tryCnt<300){
+      tryCnt++;
+      x = rand(PADL, rect.width  - PADR - 160);
+      y = rand(PADT, rect.height - PADB - 44);
+      const cxp = (x + 80) * dpr;
+      const cyp = (y + 22) * dpr;
+      if(distToHeart(cxp,cyp) > bandPx + 10*dpr) ok=true;
+    }
+    Object.assign(div.style,{ left:x+'px', top:y+'px', animationDelay:`${rand(-6,0)}s, ${rand(-4,0)}s` });
+    bubbles.push({el:div, vx:rand(-.08,.08), vy:rand(-.04,.04)});
+  }
+}
+createBubbles(); addEventListener('resize', createBubbles);
+
+function tickBubbles(){
+  const rect = bubbleBox.getBoundingClientRect();
+  for(const b of bubbles){
+    const r = b.el.getBoundingClientRect();
+    let x = parseFloat(b.el.style.left||0);
+    let y = parseFloat(b.el.style.top||0);
+    x += b.vx; y += b.vy;
+
+    if(x < PADL){ x=PADL; b.vx = Math.abs(b.vx); }
+    if(y < PADT){ y=PADT; b.vy = Math.abs(b.vy); }
+    if(x + r.width  > rect.width  - PADR){ x = rect.width  - PADR - r.width;  b.vx = -Math.abs(b.vx); }
+    if(y + r.height > rect.height - PADB){ y = rect.height - PADB - r.height; b.vy = -Math.abs(b.vy); }
+
+    const cxp = (x + r.width/2) * dpr;
+    const cyp = (y + r.height/2) * dpr;
+    if(distToHeart(cxp, cyp) < bandPx + 6*dpr){
+      const dx = (cxp - cx), dy = (cyp - cy);
+      const len = Math.hypot(dx,dy)||1;
+      b.vx = (dx/len)*.6; b.vy = (dy/len)*.6;
+      x += b.vx*3; y += b.vy*3;
+    }
+
+    b.el.style.left = x + 'px';
+    b.el.style.top  = y + 'px';
+  }
+  requestAnimationFrame(tickBubbles);
+}
+
+/* 认识多久（自 2025-04-15 21:18 起） */
+const sinceEl = document.getElementById('since');
+// 注意：JS 的月份从 0 开始，3 表示四月
+const MEET_DATE = new Date(2025, 3, 15, 21, 18, 0);
+function pad2(n){ return n.toString().padStart(2,'0'); }
+function updateSince(){
+  const now = new Date();
+  let diff = Math.max(0, now - MEET_DATE);
+  const day  = Math.floor(diff / (24*3600*1000)); diff -= day*24*3600*1000;
+  const hour = Math.floor(diff / (3600*1000));     diff -= hour*3600*1000;
+  const min  = Math.floor(diff / (60*1000));
+  sinceEl.textContent = `瓜瓜 ✦ 小星 • 认识 ${day} 天 ${pad2(hour)} 小时 ${pad2(min)} 分`;
+}
+updateSince();
+setInterval(updateSince, 60*1000);
+
+/* 控制 */
+document.getElementById('toggle').addEventListener('click',()=>{
+  paused = !paused;
+  document.getElementById('toggle').textContent = paused ? "继续" : "暂停";
+  if(!paused) t0 = performance.now();
+});
+document.getElementById('shuffle').addEventListener('click', createBubbles);
+
+/* 主循环 */
+function loop(now){
+  if(!paused) drawWords(now);
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+requestAnimationFrame(tickBubbles);
+
+})();
+</script>
+</body>
+</html>
